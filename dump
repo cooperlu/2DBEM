@@ -1,0 +1,162 @@
+%% 2D BEM
+% This code was developed to test some simple case in 2D bem
+
+clc
+
+clear all
+
+
+n = 24;
+mu = 0.945e5;%steel
+nu = 0.1;%steel
+G = mu;
+
+gaussp = [-sqrt(3/7 - 2/7*sqrt(6/5)),sqrt(3/7 - 2/7*sqrt(6/5)),...
+    -sqrt(3/7 + 2/7*sqrt(6/5)),sqrt(3/7 + 2/7*sqrt(6/5))];
+gausswp = [(1-gaussp)/2;(1+gaussp)/2];
+gaussw = [(18 + sqrt(30))/36,(18 + sqrt(30))/36,...
+    (18 - sqrt(30))/36,(18 - sqrt(30))/36]';
+
+%% Build Mesh
+angle = pi/n*2;
+nodeangle = (-angle:-angle:-2*pi)-pi/2+angle/2;
+nodex = 3*cos(nodeangle);
+nodey = 3*sin(nodeangle);
+mesh = [1:n;
+    2:n,1]';
+
+%% Important Points on Mesh
+meshx = nodex(mesh);
+meshy = nodey(mesh);
+meshmidx = (1*meshx(:,1) + 1*meshx(:,2))/2;
+meshmidy = (1*meshy(:,1) + 1*meshy(:,2))/2;
+meshgaussx = meshx * gausswp;
+meshgaussy = meshy * gausswp;
+
+xk = zeros([1,4]);
+yk = xk;
+rk = xk;
+Gma = zeros(2*n);
+Hma = zeros(2*n);
+sig = zeros(n);
+DIST = zeros(n);
+%% Integrate H
+for i = 1:n; % source
+    Hmasum = zeros(2);
+    for j = 1:n; % observe
+        
+        if j == i;
+            rx = meshx(i,2) - meshx(i,1);
+            ry = meshy(i,2) - meshy(i,1);
+            ri = sqrt(rx^2 + ry^2);
+            R = ri/2;
+            G11 = R*((3-4*nu)*(1-log(R)) + rx^2/(4*R^2))/(4*pi*mu*(1-nu));
+            G12 =rx*ry/(4*R* (4*pi*mu*(1-nu)));
+            G22 = R*((3-4*nu)*(1-log(R)) + ry^2/(4*R^2))/(4*pi*mu*(1-nu));
+            Gma((2*i-1:2*i),(2*j-1:2*j)) = [G11,G12;G12,G22];
+            H11 = 0.5;
+            H12 = 0;
+            H21 = 0;
+            H22 = 0.5;
+            Hma((2*i-1:2*i),(2*j-1:2*j)) = [H11,H12;H21,H22];
+        else
+            xi = meshmidx(i,1);
+            yi = meshmidy(i,1);
+            direction = [meshx(j,2)-meshx(j,1),meshy(j,2)-meshy(j,1)];
+            AX = direction(1)/2;
+            AY = direction(2)/2;
+            if AX == 0
+                DIST(i,j) = abs(xi-meshx(j,1));
+            else
+            ta = direction(2)/direction(1);
+            DIST(i,j) = abs((ta*xi-yi+meshy(j,1)-ta*meshx(j,1))/sqrt(ta^2+1));
+            end
+            sig(i,j) = (meshx(j,1)-xi)*(meshy(j,2)-yi) - (meshx(j,2)-xi)*(meshy(j,1)-yi);
+            if sig(i,j) < 0
+                DIST(i,j) = -DIST(i,j);
+            end
+            normal = [direction(2),-direction(1)];
+            lengthj = sqrt(direction(1)^2 + direction(2)^2);
+            nx = normal(1)/lengthj;
+            ny = normal(2)/lengthj;
+            DE = 4*pi*(1-nu);
+            G11 = 0;
+            G12 = 0;
+            G22 = 0;
+            H11 = 0;
+            H12 = 0;
+            H21 = 0;
+            H22 = 0;
+            for k = 1:4
+                XCO(k) = AX * gaussp(k) + meshmidx(j);
+                YCO(k) = AY * gaussp(k) + meshmidy(j);
+                RA = sqrt((xi-XCO(k))^2 + (yi-YCO(k))^2);
+                RDx = (XCO(k) - xi)/RA;
+                RDy = (YCO(k) - yi)/RA;
+                G11 = G11 + ((3-4*nu)*log(1/RA) + RDx^2)*gaussw(k)*lengthj/2 ...
+                    /(2*DE*G);
+                G12 = G12 + RDx*RDy*gaussw(k)*lengthj/2/(2*DE*G);
+                G22 = G22 + ((3-4*nu)*log(1/RA) + RDy^2)*gaussw(k)*lengthj/2 ...
+                    /(2*DE*G);
+                H11 = H11 - DIST(i,j)*((1-2*nu) + 2*RDx^2)/(RA^2*DE)*gaussw(k)...
+                    *lengthj/2;
+                H12 = H12 - (DIST(i,j)*2*RDx*RDy/RA + (1-2*nu)*(nx*RDy - ny*RDx))...
+                    *gaussw(k)*lengthj/2/(RA*DE);
+                H21 = H21 - (DIST(i,j)*2*RDx*RDy/RA - (1-2*nu)*(nx*RDy - ny*RDx))...
+                    *gaussw(k)*lengthj/2/(RA*DE);
+                H22 = H22 - DIST(i,j)*((1-2*nu) + 2*RDy^2)/(RA^2*DE)*gaussw(k)...
+                    *lengthj/2;
+                
+            end
+            Hma((2*i-1:2*i),(2*j-1:2*j)) = [H11,H12;H21,H22];
+            Gma((2*i-1:2*i),(2*j-1:2*j)) = [G11,G12;G12,G22];
+        end
+%         Hmasum = Hmasum + [H11,H12;H21,H22];
+    end
+%     Hma((2*i-1:2*i),(2*i-1:2*i)) = - Hmasum + [1/2,0;0,1/2]; % ASSUMPTION MADE : smooth surface
+%     Hma((2*i-1:2*i),(2*i-1:2*i)) =  [1/2,0;0,1/2];
+end
+
+% 
+% F = Hma([1:14,17:30],31:32) * [-0.1;0];
+% H = Hma;
+% H(:,[31:32,15:16]) = [];
+% H([31:32,15:16],:) = [];
+% u = H\F;
+
+for i = 1:n
+    vp(2*i-1:2*i,1)  = [cos(-pi/2-i*angle),sin(-pi/2-i*angle)]*100;
+end
+
+
+%% Calculation
+F = Gma*vp;
+M = Hma;
+% M(23,:) = [];
+M(36,:) = [];
+% M(45,:) = [];
+% M(:,23) = [];
+M(:,36) = [];
+% M(:,45) = [];
+% F(23) = [];
+F(36) = [];
+% F(45) = [];
+u = M\F;
+u = [u(1:35);0;u(36:end)];
+for i = 1:n
+    ua(i,1) = u(2*i-1);
+    ua(i,2) = u(2*i);
+end
+nnx = meshmidx' +100*(ua(:,1))';
+nny = meshmidy' +100*(ua(:,2))';
+
+%% Plot
+meshmidx = [meshmidx',meshmidx(1)];
+meshmidy = [meshmidy',meshmidy(1)];
+nnx = [nnx,nnx(1)];
+nny = [nny,nny(1)];
+
+plot(meshmidx,meshmidy,nnx,nny);
+grid on
+pbaspect([1 1 1]);
+% plot(meshmidx
